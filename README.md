@@ -1,153 +1,192 @@
-# Bat Counting with CNNs (PyTorch)
+﻿# Bat Counting and Synthetic Image Experiments
 
-Automated counting of bats in small, low‑resolution images using a two‑tier CNN approach (specialized sub‑models + a top‑level router). Built with PyTorch for ecological monitoring and conservation workflows.
+This repository contains research experiments for counting bats in small images: synthetic image generation, a compact PyTorch CNN, ResNet-18 experiments, and TensorFlow/Keras training notebooks. The classification tasks cover counts from 1 to 12, with an experimental two-stage approach that routes images to specialists for counts 1-4, 5-8, or 9-12.
 
-## Why It Matters
+The code is a collection of scripts and notebooks with local data paths, rather than an installable package. Start with the saved-model example below to try a checkpoint, or prepare the datasets before running training. Training and evaluation code has known limitations described below; saved notebook output should not be treated as a reproducible benchmark.
 
-- Improves accuracy of bat counts from noisy, low‑res imagery used by field teams.
-- Reduces manual effort by automating per‑image counting across 1–12 bats.
-- Two‑tier routing handles edge cases better than a single monolithic model.
+## Repository contents
 
-## Techniques and Architecture
+| File | Purpose |
+| --- | --- |
+| [bats_training.py](bats_training.py) | Notebook-exported PyTorch training script for a 12-class CNN, three specialists, a router, and routed evaluation. |
+| [bats_training.ipynb](bats_training.ipynb) | Interactive version of the compact CNN experiment. |
+| [modules/CNN.py](modules/CNN.py) | Three convolution/ReLU/max-pooling blocks, followed by linear layers from 3,200 features to 512 and then the requested class count. Intended for RGB 40 x 40 inputs. |
+| [zhi_bat.ipynb](zhi_bat.ipynb) | ResNet-18 experiments with configuration, augmentation, checkpoint saving, early stopping, and combined-model trials. Uses 224 x 224 inputs. |
+| [Final_Project_Training_1_1.ipynb](Final_Project_Training_1_1.ipynb) | TensorFlow/Keras training and testing for specialists, a router, and a 12-class model; includes classification metrics and confusion matrices. |
+| [image generation.py](image%20generation.py) | Command-line synthetic image generator using OpenCV masks and Pillow compositing. |
+| [Image Generation and Bounding Box Automation.ipynb](Image%20Generation%20and%20Bounding%20Box%20Automation.ipynb) | Interactive generation, bounding-box visualization, and custom text-label export experiments. |
+| `1_12_bats.pth`, `1_4_model.pth`, `5_8_model.pth`, `9_12_model.pth`, `top_model.pth` | Included ResNet-style state dictionaries, with a sequential dropout/linear classification head, matching the architecture used in `zhi_bat.ipynb`. These are not weights for `modules/CNN.py`. |
+| `Final Testing Dataset.zip` | Images in count folders `1` through `12`: 501 images in `1`, 500 in each other folder (6,001 total). |
+| `Bat_Time_Testing.zip` | Additional images in folders `1`, `5`, and `9`: 2,001, 2,000, and 2,000 images respectively. |
+| [modules/Countception.py](modules/Countception.py) | Separate experimental scalar-output counting network, including a random-input smoke example. Not used by the main training script. |
+| [message.txt](message.txt) | Standalone illustrative code for selecting among CNNs using image variance. Not part of the training pipeline. |
 
-- Input and preprocessing
-  - Images are treated as small square inputs; the baseline CNN assumes 40×40 resolution.
-  - Recommended: add `transforms.Resize((40, 40))` during training/inference if your data is not already 40×40.
-  - Augmentation: random rotation (±45°) via `torchvision.transforms.RandomRotation(45)`.
-- CNN backbone (modules/CNN.py)
-  - Conv2d(3→32, 3×3, pad=1) → ReLU → MaxPool2d(2)
-  - Conv2d(32→64, 3×3, pad=1) → ReLU → MaxPool2d(2)
-  - Conv2d(64→128, 3×3, pad=1) → ReLU → MaxPool2d(2)
-  - Flatten → Linear(3200→512) → Linear(512→C)
-  - Note: The `3200` feature size corresponds to 40×40 inputs after three 2× downsamplings.
-- Two‑tier ensemble routing
-  - Specialized classifiers: `1_4` (4 classes), `5_8` (4 classes), `9_12` (4 classes).
-  - Top‑level router: 3‑class classifier deciding which specialist to use.
-  - Inference: for a batch, the router outputs argmax decisions {0,1,2}. Based on decision, the corresponding specialist’s logits are written into a 12‑length vector at indices:
-    - decision 0 → positions 0–3 (counts 1–4)
-    - decision 1 → positions 4–7 (counts 5–8)
-    - decision 2 → positions 8–11 (counts 9–12)
-  - Final prediction = argmax over the stitched 12‑way logits.
+## Environment setup
 
-## Training Details
+Run commands from the repository root. A Python environment with `pip` is required; no dependency lockfile or tested version matrix is included. The commands below use PowerShell, matching the Windows paths in the scripts.
 
-- Data splits: 60% train, 20% validation, 20% test (random split per run).
-- Loss: `nn.CrossEntropyLoss()` for all models.
-- Optimizer: Adam.
-  - Learning rates observed in code: `1_12` uses 1e‑3; `1_4`, `5_8`, `9_12`, and `Top` use 1e‑4.
-- Hyperparameters: 50 epochs, batch size 32, `num_workers=4` for DataLoader.
-- Device: CUDA if available, else CPU (`torch.device('cuda' if available else 'cpu')`).
-- Logging: per‑batch progress with `tqdm`; per‑epoch validation accuracy and loss.
-
-## Synthetic Data Generation (image generation.py)
-
-Used to balance classes and increase robustness by simulating varied scenes.
-
-- Foreground extraction: K‑means (k=2) on pixel colors to create a binary mask of the bat (`cv2.kmeans`). Assumes bats are darker than background; can invert when needed.
-- Compositing: Alpha‑like pasting of masked bat cutouts onto random background images (PIL `paste` with mask).
-- Scaling: Bats are randomly shrunk; scale range depends on target count (more bats → smaller scale) to keep scenes realistic.
-- Placement: Random coordinates with a minimum‑distance constraint to avoid overlaps (Poisson‑disc‑like spacing by thresholding Euclidean distance).
-- Post‑processing: Optional Gaussian blur, convert to grayscale to mimic low‑quality sensors.
-- CLI usage example:
-  ```bash
-  python "image generation.py" \
-    --data_path ./NewCroppedImages \
-    --save_location "./Final Testing Dataset" \
-    --num_2_gen 1000
-  ```
-  Expects `./NewCroppedImages/0` (backgrounds) and `./NewCroppedImages/1` (bat cutouts).
-
-## Data Layout
-
-Expected structure under `Data/` in the project root:
-
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install torch torchvision numpy pillow opencv-python tqdm jupyterlab matplotlib
 ```
+
+For the TensorFlow/Keras notebook, also install:
+
+```powershell
+python -m pip install tensorflow scikit-learn seaborn
+```
+
+CPU execution is supported by the PyTorch script; it selects CUDA when available. For macOS/Linux, activate with `source .venv/bin/activate` and replace hard-coded Windows path separators in the source with portable paths before running it.
+
+To open the notebooks:
+
+```powershell
+python -m jupyterlab
+```
+
+## Try an included checkpoint
+
+The checked-in `.pth` files contain state dictionaries with ResNet keys such as `conv1.weight`, `layer1...`, and `fc.1.weight`. Reconstruct the matching model instead of loading them into the compact `CNN`. Run this Python example from the repository root, replacing `path/to/image.jpg` with an image:
+
+```python
+import torch
+from torch import nn
+from torchvision import models, transforms
+from PIL import Image
+
+model = models.resnet18(weights=None)
+model.fc = nn.Sequential(nn.Dropout(0.5), nn.Linear(model.fc.in_features, 12))
+state = torch.load("1_12_bats.pth", map_location="cpu", weights_only=True)
+model.load_state_dict(state)
+model.eval()
+
+preprocess = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+])
+with Image.open("path/to/image.jpg") as image:
+    batch = preprocess(image.convert("RGB")).unsqueeze(0)
+with torch.inference_mode():
+    index = model(batch).argmax(dim=1).item()
+print("Predicted class index:", index)
+
+# Use this mapping only if training used the unmodified count-folder names:
+classes = sorted(str(count) for count in range(1, 13))
+print("Count under the original ImageFolder ordering:", classes[index])
+```
+
+For specialists, use a four-output head and the corresponding checkpoint; the router uses three outputs. Class mappings were not saved alongside the checkpoints, so confirm the training folder order before interpreting a prediction as a bat count. Numeric folder names are sorted lexicographically: `1, 10, 11, 12, 2, ...`, not numerically. The `9_12` specialist similarly orders folders as `10, 11, 12, 9`.
+
+## Prepare data for compact CNN training
+
+Extract the bundled count dataset into the nested directory expected by `bats_training.py`:
+
+```powershell
+Expand-Archive -LiteralPath 'Final Testing Dataset.zip' -DestinationPath 'Data/Final Testing Dataset'
+```
+
+Create the specialist/router layout by copying each count folder into its group:
+
+```powershell
+$groups = @{
+    '1_4' = 1..4
+    '5_8' = 5..8
+    '9_12' = 9..12
+}
+foreach ($group in $groups.Keys) {
+    $destination = Join-Path 'Data/Top_level' $group
+    New-Item -ItemType Directory -Force -Path $destination | Out-Null
+    foreach ($count in $groups[$group]) {
+        Copy-Item -LiteralPath "Data/Final Testing Dataset/Final Testing Dataset/$count" -Destination $destination -Recurse
+    }
+}
+```
+
+Run the copy step once on a fresh layout. The resulting structure is:
+
+```text
 Data/
-├─ Final Testing Dataset/
-│  └─ Final Testing Dataset/
-│     ├─ 1
-│     ├─ 2
-│     ├─ 3
-│     └─ ... (classes 1–12)
-└─ Top_level/
-   ├─ 1_4/
-   ├─ 5_8/
-   └─ 9_12/
+  Final Testing Dataset/
+    Final Testing Dataset/
+      1/ ... 12/          # count-labeled images
+  Top_level/
+    1_4/
+      1/ 2/ 3/ 4/
+    5_8/
+      5/ 6/ 7/ 8/
+    9_12/
+      9/ 10/ 11/ 12/
 ```
 
-## Tech Stack
+`ImageFolder` sees individual count folders when rooted at a specialist directory, and three group classes when rooted at `Data/Top_level`. Copying images into these groups does not create an independent evaluation set.
 
-- Core: Python 3.x, PyTorch, Torchvision
-- Computer vision: OpenCV (cv2), Pillow (PIL)
-- Numerics & utilities: NumPy, TQDM
-- Optional: CUDA for GPU acceleration
+The additional archive can be extracted separately:
 
-## Repository Contents
-
-- `bats_training.py`: Trains the 12‑class model, specialists, and router; contains validation loops and a simple routed inference.
-- `modules/CNN.py`: Lightweight CNN used by all models.
-- `Image Generation and Bounding Box Automation.ipynb`, `image generation.py`: Synthetic data generation.
-- `Final_Project_Training_1_1.ipynb`, `zhi_bat.ipynb`: Exploration/experiments.
-- `*.pth`: Saved model weights.
-
-## Quick Start
-
-1) Install dependencies
-
-```bash
-pip install torch torchvision tqdm numpy opencv-python pillow
+```powershell
+Expand-Archive -LiteralPath 'Bat_Time_Testing.zip' -DestinationPath 'Data'
 ```
 
-2) Prepare data
+This creates `Data/Bat Time Testing`; the training script does not load it automatically.
 
-- Organize folders as shown in Data Layout.
-- If your inputs are not 40×40, enable a resize step in `bats_training.py`:
-  ```python
-  transforms.Resize((40, 40))
-  ```
+## Train and explore
 
-3) Train
+### Compact PyTorch CNN
 
-```bash
+Before running `bats_training.py` or its notebook:
+
+1. Prepare the data layout above and check every `root_dir` assignment.
+2. Use `transforms.Resize((40, 40))` in the transform pipeline if images are not already 40 x 40. `ImageFolder` loads images as RGB, including grayscale files.
+3. On Windows, set all `DataLoader` calls to `num_workers=0` for this top-level script/notebook. Keeping worker processes requires restructuring the script under an `if __name__ == "__main__":` guard.
+4. Change the checkpoint output filename or preserve the included file before training: the script overwrites `1_12_bats.pth` with a serialized compact CNN object, which is a different format and architecture from the included ResNet state dictionary.
+
+Then run:
+
+```powershell
 python bats_training.py
 ```
 
-Outputs: `1_12_bats.pth`, `1_4_model.pth`, `5_8_model.pth`, `9_12_model.pth`, `top_model.pth`.
+The script trains all five models sequentially for 50 epochs each, using batch size 32, cross-entropy loss, and Adam. The 12-class model uses learning rate `0.001`; specialists and router use `0.0001`. Each dataset is randomly split into 60% training, 20% validation, and 20% testing. Only the 12-class model has an explicit save call in this script; saving the other trained models requires adding save calls.
 
-## Evaluation
+### Other notebooks
 
-- The script reports validation accuracy and loss after each epoch; a final test pass reports accuracy on the held‑out split.
-- Recommended extensions:
-  - Add a confusion matrix (e.g., via scikit‑learn) to inspect class‑wise errors.
-  - Track top‑k accuracy and calibration (ECE) for deployment readiness.
+- **`zhi_bat.ipynb`:** edit `Config.data_paths` (currently `/content/...`) and `Config.model_save_paths` before executing. Its ResNet models use 224 x 224 images and ImageNet normalization. There are two separate `main()` experiment cells, both with immediate execution; review and select the intended experiment rather than running every cell blindly. Its save paths overlap the included checkpoint filenames.
+- **`Final_Project_Training_1_1.ipynb`:** update archive, data, and model paths in the relevant cells. Run imports and model-creation functions before the desired specialist, router, or 12-class section. This workflow uses Keras models and `.keras` outputs; it does not consume the PyTorch checkpoints.
+- **`modules/Countception.py`:** run `python modules/Countception.py` to print outputs for a random batch of RGB 40 x 40 tensors. This is an architecture smoke example, not trained inference.
 
-## Results (Observed)
+### Evaluation limitations
 
-- Ensemble routing improved accuracy vs. a single 12‑class classifier, especially for small counts.
-- Prior runs achieved up to ~93% overall accuracy on a combined test split.
-- Remaining challenges: dense scenes (9–12), occlusion, and clutter.
+These issues are present in the code and should be addressed before reporting model comparisons:
 
-## Environment
+- Routed outputs assume numeric count order, while `ImageFolder` assigns lexicographic labels. Map each specialist's class names explicitly into the global class mapping.
+- Unselected routed logits are initialized to zero. Those zeros can beat negative logits from the selected specialist; use an excluded-class mask or map the specialist's predicted class directly.
+- The compact CNN workflow shares random rotation across training, validation, and test subsets, and generates a fresh split for final evaluation. Splits across copied datasets are independent, so training/evaluation overlap is possible. Persist one split by image identity and use deterministic evaluation transforms.
+- The compact CNN's printed validation/test loss accumulates the last training `loss`, rather than the newly computed `val_loss`.
+- In `zhi_bat.ipynb`, the first combined experiment trains and evaluates on the same loader. The later experiment reuses a specialist optimizer for the router, includes the 12-class model among specialists, and evaluates combined count outputs against group labels. These cells require correction before using their metrics.
 
-- Runs on CPU or GPU; training benefits significantly from CUDA.
-- Suggested: Python 3.9+; recent PyTorch/Torchvision matching your CUDA runtime.
-- Reproducibility tips: set seeds, fix dataloader workers, and avoid non‑deterministic ops if comparing runs.
+## Generate synthetic images
 
-## My Role (for Recruiters)
+Supply your own source images; the required background and single-bat crop collection is not bundled in its expected layout:
 
-- Built the two‑tier CNN (router + specialists) and training loops in PyTorch.
-- Designed synthetic data strategy (K‑means masking, compositing, blur/noise) to balance classes.
-- Implemented validation/testing and saved model checkpoints for reproducibility.
-- Documented setup and structure for straightforward reruns.
+```text
+NewCroppedImages/
+  0/    # background images
+  1/    # single-bat crop images
+```
 
-Copy‑ready bullet:
-- Developed a two‑tier CNN in PyTorch to automate bat counting from low‑resolution imagery, improving accuracy to ~93% on held‑out data and reducing manual effort for ecological surveys.
+Use readable image files only in these directories. The placement code assumes a 40 x 40 scene and dark bats against lighter backgrounds. It uses two-cluster K-means masks, random scaling and placement, compositing, Gaussian blur, and grayscale output.
 
-## Future Work
+Create the output parent directory first, then run:
 
-- Stronger backbones (e.g., ResNet) or detection‑first pipelines for dense scenes.
-- Spatial localization (e.g., R‑CNN/anchor‑free) and uncertainty estimates.
-- Metric learning or ordinal classification to reflect the ordered nature of counts.
+```powershell
+New-Item -ItemType Directory -Force -Path 'Generated Dataset' | Out-Null
+python "image generation.py" --data_path './NewCroppedImages' --save_location './Generated Dataset' --num_2_gen 1000
+```
+
+`--num_2_gen` is the number of images **per count**, defaulting to 1,000. The script creates folders `2` through `12` (11,000 images with the default), with filenames such as `(2)_0.jpg`. It does not generate classes `0` or `1`; supply single-bat images separately for a full 1-12 training dataset. Reusing an output directory overwrites matching filenames.
+
+The CLI saves images only. For bounding-box experiments, use `Image Generation and Bounding Box Automation.ipynb`, replace its `Bats/...` source paths, and create the referenced output directories before generation. Its text labels use a custom format: a class token, all normalized position pairs, then all dimension pairs. They require conversion before use with a detector expecting a standard annotation format.
 
 ## Contributors
 
@@ -160,9 +199,4 @@ Copy‑ready bullet:
 
 ## License
 
-MIT — see `LICENSE` (if provided) for details.
-
-## Contact
-
-Open an issue or reach out to the maintainer.
-
+No license file is included in this repository.
